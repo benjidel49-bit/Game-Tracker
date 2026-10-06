@@ -91,12 +91,15 @@ header{position:sticky;top:env(safe-area-inset-top,0px);z-index:100;
 .card:hover{border-color:rgba(74,222,128,.35);transform:translateY(-2px)}
 .card-img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block;filter:brightness(.9);transition:filter .3s}
 .card:hover .card-img{filter:brightness(1)}
-.card-delete{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.75);
-  border:1px solid rgba(255,255,255,.15);color:var(--danger);font-size:12px;
+.card-actions{position:absolute;top:6px;right:6px;display:flex;gap:4px;opacity:0;transition:opacity .15s}
+.card:hover .card-actions{opacity:1}
+.card-edit,.card-delete{background:rgba(0,0,0,.78);
+  border:1px solid rgba(255,255,255,.15);font-size:12px;
   width:26px;height:26px;border-radius:50%;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  opacity:0;transition:opacity .15s,background .2s}
-.card:hover .card-delete{opacity:1}
+  display:flex;align-items:center;justify-content:center;transition:background .2s}
+.card-edit{color:var(--accent)}
+.card-edit:hover{background:rgba(74,222,128,.2)}
+.card-delete{color:var(--danger)}
 .card-delete:hover{background:rgba(248,113,113,.2)}
 
 /* Modals */
@@ -137,8 +140,11 @@ header{position:sticky;top:env(safe-area-inset-top,0px);z-index:100;
 .cat-item{display:flex;align-items:center;justify-content:space-between;
   background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px}
 .cat-item-name{font-family:'Rajdhani',sans-serif;font-weight:600;font-size:.95rem}
-.cat-item-del{background:none;border:none;color:var(--muted);cursor:pointer;
-  font-size:14px;padding:2px 6px;border-radius:var(--radius);transition:color .15s,background .15s}
+.cat-item-controls{display:flex;align-items:center;gap:3px}
+.cat-item-move,.cat-item-del{background:none;border:none;color:var(--muted);cursor:pointer;
+  font-size:13px;padding:3px 6px;border-radius:var(--radius);transition:color .15s,background .15s}
+.cat-item-move:hover{color:var(--accent);background:rgba(74,222,128,.1)}
+.cat-item-move.disabled{opacity:.25;cursor:not-allowed;pointer-events:none}
 .cat-item-del:hover{color:var(--danger);background:rgba(248,113,113,.1)}
 .cat-item-del.disabled{opacity:.3;cursor:not-allowed;pointer-events:none}
 .add-cat-row{display:flex;gap:8px}
@@ -248,6 +254,31 @@ footer{border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center
   </div>
 </div>
 
+<!-- Modal modification tracker -->
+<div class="overlay" id="overlayEdit">
+  <div class="modal">
+    <h2>Modifier le tracker</h2>
+    <div class="field">
+      <label>LIEN SHAREPOINT / URL DU FICHIER</label>
+      <input type="text" id="edit-url" placeholder="https://…">
+    </div>
+    <div class="field">
+      <label>IMAGE DE COUVERTURE (URL)</label>
+      <input type="text" id="edit-img" placeholder="https://…">
+      <img id="editImgPreview" class="preview-img" src="" alt="" style="display:none">
+    </div>
+    <div class="field">
+      <label>CATÉGORIE</label>
+      <select id="edit-cat"></select>
+    </div>
+    <p class="error-msg" id="editErrMsg">Veuillez remplir le lien du fichier.</p>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="closeEdit">Annuler</button>
+      <button class="btn-save" id="saveEdit">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal gestion catégories -->
 <div class="overlay" id="overlayCat">
   <div class="modal">
@@ -292,6 +323,7 @@ const STATIC = [
 let db = null;
 let trackers = JSON.parse(JSON.stringify(STATIC)); // start with statics, db overrides
 let deletedStatics = new Set();  // ids of static trackers the user deleted
+let trackerOverrides = {};         // modifications des trackers statiques
 let customTrackers = [];
 let categories = JSON.parse(JSON.stringify(DEFAULT_CATS));
 let activeFilter = 'all';
@@ -306,6 +338,12 @@ async function initDB() {
     try {
       const delSnap = await db.collection('meta').doc('deletedStatics').get();
       if (delSnap.exists) deletedStatics = new Set(delSnap.data().ids || []);
+    } catch(e) {}
+
+    // Load modifications des trackers statiques
+    try {
+      const ovSnap = await db.collection('meta').doc('trackerOverrides').get();
+      if (ovSnap.exists) trackerOverrides = ovSnap.data().list || {};
     } catch(e) {}
 
     // Load categories
@@ -327,7 +365,9 @@ async function initDB() {
 // ── Compute all trackers ──
 function allTrackers() {
   return [
-    ...STATIC.filter(t => !deletedStatics.has(t.id)),
+    ...STATIC
+      .filter(t => !deletedStatics.has(t.id))
+      .map(t => ({ ...t, ...(trackerOverrides[t.id] || {}) })),
     ...customTrackers
   ];
 }
@@ -374,6 +414,18 @@ function renderGrid() {
     img.alt = '';
     img.onerror = () => { img.style.background = 'var(--surface2)'; img.src = ''; };
 
+    const actions = document.createElement('div');
+    actions.className = 'card-actions';
+
+    const edit = document.createElement('button');
+    edit.className = 'card-edit';
+    edit.title = 'Modifier';
+    edit.textContent = '✎';
+    edit.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+      openEditModal(t);
+    });
+
     const del = document.createElement('button');
     del.className = 'card-delete';
     del.title = 'Supprimer';
@@ -394,8 +446,10 @@ function renderGrid() {
       } catch(err) { showToast('Erreur suppression'); }
     });
 
+    actions.appendChild(edit);
+    actions.appendChild(del);
     card.appendChild(img);
-    card.appendChild(del);
+    card.appendChild(actions);
     grid.appendChild(card);
     visible++;
   });
@@ -472,6 +526,102 @@ document.getElementById('saveTracker').addEventListener('click', async () => {
   } finally { btn.disabled = false; btn.textContent = 'Ajouter'; }
 });
 
+// ── Modal Edit tracker ──
+const overlayEdit = document.getElementById('overlayEdit');
+let editingTrackerId = null;
+
+function populateEditCatSelect(selected) {
+  const sel = document.getElementById('edit-cat');
+  sel.innerHTML = '';
+  categories.filter(c => c.id !== 'all').forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.label;
+    if (c.id === selected) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function openEditModal(t) {
+  editingTrackerId = t.id;
+  document.getElementById('edit-url').value = t.url || '';
+  document.getElementById('edit-img').value = t.img || '';
+  populateEditCatSelect(t.tags || 'other');
+  document.getElementById('editErrMsg').style.display = 'none';
+
+  const preview = document.getElementById('editImgPreview');
+  if (t.img) {
+    preview.src = t.img;
+    preview.style.display = 'block';
+  } else {
+    preview.style.display = 'none';
+  }
+  overlayEdit.classList.add('open');
+}
+
+function closeEditModal() {
+  overlayEdit.classList.remove('open');
+  editingTrackerId = null;
+}
+
+document.getElementById('closeEdit').addEventListener('click', closeEditModal);
+overlayEdit.addEventListener('click', e => {
+  if (e.target === overlayEdit) closeEditModal();
+});
+
+document.getElementById('edit-img').addEventListener('input', e => {
+  const preview = document.getElementById('editImgPreview');
+  const val = e.target.value.trim();
+  if (val.startsWith('http')) {
+    preview.src = val;
+    preview.style.display = 'block';
+    preview.onerror = () => { preview.style.display = 'none'; };
+  } else {
+    preview.style.display = 'none';
+  }
+});
+
+document.getElementById('saveEdit').addEventListener('click', async () => {
+  const url = document.getElementById('edit-url').value.trim();
+  const img = document.getElementById('edit-img').value.trim();
+  const tags = document.getElementById('edit-cat').value;
+
+  if (!url) {
+    document.getElementById('editErrMsg').style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('saveEdit');
+  btn.disabled = true;
+  btn.textContent = 'Enregistrement…';
+
+  try {
+    if (editingTrackerId.startsWith('s')) {
+      trackerOverrides[editingTrackerId] = { url, img, tags };
+      if (db) {
+        await db.collection('meta').doc('trackerOverrides').set({ list: trackerOverrides });
+      }
+    } else {
+      const index = customTrackers.findIndex(x => x.id === editingTrackerId);
+      if (index !== -1) {
+        customTrackers[index] = { ...customTrackers[index], url, img, tags };
+        if (db) {
+          await db.collection('trackers').doc(editingTrackerId).set({ url, img, tags });
+        }
+      }
+    }
+
+    renderAll();
+    closeEditModal();
+    showToast('✓ Tracker modifié !');
+  } catch(err) {
+    showToast('Erreur lors de la modification');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Enregistrer';
+  }
+});
+
 // ── Modal Manage categories ──
 const overlayCat = document.getElementById('overlayCat');
 document.getElementById('openManageCat').addEventListener('click', () => {
@@ -484,16 +634,49 @@ overlayCat.addEventListener('click', e => { if (e.target === overlayCat) overlay
 function renderCatList() {
   const list = document.getElementById('catList');
   list.innerHTML = '';
+
   categories.forEach((cat, i) => {
     const row = document.createElement('div');
     row.className = 'cat-item';
+
     const name = document.createElement('span');
     name.className = 'cat-item-name';
     name.textContent = cat.label;
+
+    const controls = document.createElement('div');
+    controls.className = 'cat-item-controls';
+
+    const up = document.createElement('button');
+    up.className = 'cat-item-move' + (i === 0 ? ' disabled' : '');
+    up.textContent = '↑';
+    up.title = 'Monter';
+    if (i > 0) {
+      up.addEventListener('click', async () => {
+        [categories[i - 1], categories[i]] = [categories[i], categories[i - 1]];
+        await saveCats();
+        renderCatList();
+        renderAll();
+      });
+    }
+
+    const down = document.createElement('button');
+    down.className = 'cat-item-move' + (i === categories.length - 1 ? ' disabled' : '');
+    down.textContent = '↓';
+    down.title = 'Descendre';
+    if (i < categories.length - 1) {
+      down.addEventListener('click', async () => {
+        [categories[i], categories[i + 1]] = [categories[i + 1], categories[i]];
+        await saveCats();
+        renderCatList();
+        renderAll();
+      });
+    }
+
     const del = document.createElement('button');
     del.className = 'cat-item-del' + (cat.id === 'all' ? ' disabled' : '');
     del.textContent = '✕';
     del.title = cat.id === 'all' ? 'Ne peut pas être supprimé' : 'Supprimer';
+
     if (cat.id !== 'all') {
       del.addEventListener('click', async () => {
         categories = categories.filter(c => c.id !== cat.id);
@@ -504,8 +687,12 @@ function renderCatList() {
         showToast('Catégorie supprimée');
       });
     }
+
+    controls.appendChild(up);
+    controls.appendChild(down);
+    controls.appendChild(del);
     row.appendChild(name);
-    row.appendChild(del);
+    row.appendChild(controls);
     list.appendChild(row);
   });
 }
@@ -531,6 +718,14 @@ async function saveCats() {
   try { if (db) await db.collection('meta').doc('categories').set({ list: categories }); }
   catch(e) { console.warn('saveCats error', e); }
 }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (overlayEdit.classList.contains('open')) closeEditModal();
+    if (overlayAdd.classList.contains('open')) closeAddModal();
+    if (overlayCat.classList.contains('open')) overlayCat.classList.remove('open');
+  }
+});
 
 // ── Toast ──
 function showToast(msg) {
