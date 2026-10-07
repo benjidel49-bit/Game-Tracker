@@ -319,53 +319,6 @@ const STATIC = [
   { id:'s11',tags:'other',   url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7BA0CEAFE3-EACE-44C1-945B-0A6652C4B5AA%7D&file=Liste%20des%20Techniques%20Xv2.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/873e8ec7325c385c755c85d0314299e9.jpg' },
 ];
 
-
-// ── Supabase configuration ──
-const SUPABASE_URL = 'https://srahvrjmcancnysirpgq.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_4J_AmUc8doQ4R9zatcLHMQ_jKVzUYxN';
-
-async function supabaseRequest(path, options = {}) {
-  const headers = {
-    'apikey': SUPABASE_KEY,
-    'Authorization': 'Bearer ' + SUPABASE_KEY,
-    'Content-Type': 'application/json',
-    'Prefer': options.prefer || 'return=minimal',
-    ...(options.headers || {})
-  };
-
-  const response = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
-    method: options.method || 'GET',
-    headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Supabase ${response.status}: ${text}`);
-  }
-
-  if (response.status === 204) return null;
-  const text = await response.text();
-  return text ? JSON.parse(text) : null;
-}
-
-async function sbGet(table, query = '') {
-  return supabaseRequest(table + query, { method: 'GET' });
-}
-
-async function sbUpsert(table, rows) {
-  return supabaseRequest(table, {
-    method: 'POST',
-    prefer: 'resolution=merge-duplicates,return=minimal',
-    body: Array.isArray(rows) ? rows : [rows],
-    headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' }
-  });
-}
-
-async function sbDelete(table, query) {
-  return supabaseRequest(table + query, { method: 'DELETE' });
-}
-
 // ── State ──
 let trackers = JSON.parse(JSON.stringify(STATIC)); // start with statics, db overrides
 let deletedStatics = new Set();  // ids of static trackers the user deleted
@@ -374,44 +327,78 @@ let customTrackers = [];
 let categories = JSON.parse(JSON.stringify(DEFAULT_CATS));
 let activeFilter = 'all';
 
-// ── Supabase DB init ──
-async function initDB() {
-  try {
-    // Deleted static trackers
-    try {
-      const rows = await sbGet('meta', '?select=id,data&id=eq.deletedStatics&limit=1');
-      if (rows?.length) deletedStatics = new Set(rows[0].data?.ids || []);
-    } catch(e) { console.warn('deletedStatics load:', e); }
-
-    // Static tracker overrides
-    try {
-      const rows = await sbGet('meta', '?select=id,data&id=eq.trackerOverrides&limit=1');
-      if (rows?.length) trackerOverrides = rows[0].data?.list || {};
-    } catch(e) { console.warn('trackerOverrides load:', e); }
-
-    // Categories
-    try {
-      const rows = await sbGet('meta', '?select=id,data&id=eq.categories&limit=1');
-      if (rows?.length && Array.isArray(rows[0].data?.list)) {
-        categories = rows[0].data.list;
-      }
-    } catch(e) { console.warn('categories load:', e); }
-
-    // Custom trackers
-    try {
-      const rows = await sbGet('trackers', '?select=id,url,img,tags&order=id.asc');
-      customTrackers = (rows || []).map(d => ({
-        id: d.id, url: d.url || '', img: d.img || '', tags: d.tags || 'other'
-      }));
-    } catch(e) { console.warn('trackers load:', e); }
-
-  } catch(e) {
-    console.warn('Supabase unavailable:', e);
-    showToast('⚠ Supabase indisponible');
-  }
-
-  renderAll();
-}
+const SUPABASE_URL = 'https://srahvrjmcancnysirpgq.supabase.co'; 
+const SUPABASE_KEY = 'sb_publishable_4J_AmUc8doQ4R9zatcLHMQ_jKVzUYxN'; 
+const SUPABASE_HEADERS = { 
+  apikey: SUPABASE_KEY, 
+  Authorization: `Bearer ${SUPABASE_KEY}`, 
+  'Content-Type': 'application/json' 
+}; 
+async function supabaseRequest(path, options = {}) { 
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { 
+    ...options, 
+    headers: { 
+      ...SUPABASE_HEADERS, 
+      ...(options.headers || {}) 
+    } 
+  }); 
+  if (!response.ok) { 
+    const body = await response.text(); 
+    throw new Error(`Supabase ${response.status}: ${body}`); 
+  } 
+  if (response.status === 204) return null; 
+  const contentType = response.headers.get('content-type') || ''; 
+  return contentType.includes('application/json') 
+    ? response.json() 
+    : null; 
+} 
+async function saveMeta(key, value) { 
+  await supabaseRequest('meta?on_conflict=key', { 
+    method: 'POST', 
+    headers: { 
+      Prefer: 'resolution=merge-duplicates,return=minimal' 
+    }, 
+    body: JSON.stringify({ key, value }) 
+  }); 
+} 
+async function initDB() { 
+  try { 
+    const rows = await supabaseRequest( 
+      'trackers?select=id,url,img,tags&order=created_at.asc' 
+    ); 
+    customTrackers = (rows || []).map(d => ({ 
+      id: d.id, 
+      url: d.url, 
+      img: d.img || '', 
+      tags: d.tags || 'other' 
+    })); 
+    try { 
+      const metaRows = await supabaseRequest('meta?select=key,value'); 
+      (metaRows || []).forEach(row => { 
+        if (row.key === 'deletedStatics') { 
+          deletedStatics = new Set( 
+            Array.isArray(row.value?.ids) ? row.value.ids : [] 
+          ); 
+        } 
+        if (row.key === 'trackerOverrides') { 
+          trackerOverrides = row.value?.list || {}; 
+        } 
+        if (row.key === 'categories') { 
+          categories = Array.isArray(row.value?.list) 
+            ? row.value.list 
+            : DEFAULT_CATS; 
+        } 
+      }); 
+    } catch (e) { 
+      console.warn('Métadonnées Supabase indisponibles:', e); 
+    } 
+    console.log('Supabase connecté'); 
+  } catch (e) { 
+    console.error('Supabase indisponible:', e); 
+    showToast('⚠ Impossible de charger les trackers sauvegardés'); 
+  } 
+  renderAll(); 
+} 
 
 // ── Compute all trackers ──
 function allTrackers() {
@@ -486,11 +473,18 @@ function renderGrid() {
       if (!confirm('Supprimer ce tracker ?')) return;
       try {
         if (isCustom) {
-          await sbDelete('trackers', '?id=eq.' + encodeURIComponent(t.id));
+          await supabaseRequest(
+  `trackers?id=eq.${encodeURIComponent(t.id)}`,
+  {
+    method: 'DELETE'
+  }
+);
           customTrackers = customTrackers.filter(x => x.id !== t.id);
         } else {
           deletedStatics.add(t.id);
-          await sbUpsert('meta', { id: 'deletedStatics', data: { ids: [...deletedStatics] } });
+         await saveMeta('deletedStatics', {
+  ids: [...deletedStatics]
+});
         }
         renderGrid();
         showToast('Tracker supprimé');
@@ -564,16 +558,25 @@ document.getElementById('saveTracker').addEventListener('click', async () => {
   const t = { id, url, img, tags };
 
   try {
-    await sbUpsert('trackers', { id, url, img, tags });
+    await supabaseRequest('trackers', { 
+	  method: 'POST', 
+  	headers: { 
+ 	   Prefer: 'return=minimal' 
+  }, 
+  	body: JSON.stringify({ 
+  	  id, 
+ 	   url, 
+   	 img, 
+  	  tags 
+  }) 
+}); 
     customTrackers.push(t);
     renderGrid();
     closeAddModal();
     showToast('✓ Tracker ajouté !');
   } catch(err) {
-    customTrackers.push(t);
-    renderGrid();
-    closeAddModal();
-    showToast('✓ Ajouté (session)');
+  console.error('Erreur ajout tracker:', err);
+  showToast('❌ Tracker non sauvegardé');
   } finally { btn.disabled = false; btn.textContent = 'Ajouter'; }
 });
 
@@ -649,12 +652,28 @@ document.getElementById('saveEdit').addEventListener('click', async () => {
   try {
     if (editingTrackerId.startsWith('s')) {
       trackerOverrides[editingTrackerId] = { url, img, tags };
-      await sbUpsert('meta', { id: 'trackerOverrides', data: { list: trackerOverrides } });
+      await saveMeta('trackerOverrides', {
+  list: trackerOverrides
+});
     } else {
       const index = customTrackers.findIndex(x => x.id === editingTrackerId);
       if (index !== -1) {
         customTrackers[index] = { ...customTrackers[index], url, img, tags };
-        await sbUpsert('trackers', { id: editingTrackerId, url, img, tags });
+        await supabaseRequest(
+  `trackers?id=eq.${encodeURIComponent(editingTrackerId)}`,
+  {
+    method: 'PATCH',
+    headers: {
+      Prefer: 'return=minimal'
+    },
+    body: JSON.stringify({
+      url,
+      img,
+      tags,
+      updated_at: new Date().toISOString()
+    })
+  }
+);
       }
     }
 
@@ -762,8 +781,14 @@ document.getElementById('newCatInput').addEventListener('keydown', e => {
 });
 
 async function saveCats() {
-  try { await sbUpsert('meta', { id: 'categories', data: { list: categories } }); }
-  catch(e) { console.warn('saveCats error', e); }
+  try {
+    await saveMeta('categories', {
+      list: categories
+    });
+  } catch(e) {
+    console.warn('saveCats error', e);
+    showToast('Erreur sauvegarde catégories');
+  }
 }
 
 document.addEventListener('keydown', e => {
