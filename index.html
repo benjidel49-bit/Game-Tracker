@@ -319,8 +319,54 @@ const STATIC = [
   { id:'s11',tags:'other',   url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7BA0CEAFE3-EACE-44C1-945B-0A6652C4B5AA%7D&file=Liste%20des%20Techniques%20Xv2.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/873e8ec7325c385c755c85d0314299e9.jpg' },
 ];
 
+
+// ── Supabase configuration ──
+const SUPABASE_URL = 'https://srahvrjmcancnysirpgq.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_4J_AmUc8doQ4R9zatcLHMQ_jKVzUYxN';
+
+async function supabaseRequest(path, options = {}) {
+  const headers = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': 'Bearer ' + SUPABASE_KEY,
+    'Content-Type': 'application/json',
+    'Prefer': options.prefer || 'return=minimal',
+    ...(options.headers || {})
+  };
+
+  const response = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+    method: options.method || 'GET',
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Supabase ${response.status}: ${text}`);
+  }
+
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function sbGet(table, query = '') {
+  return supabaseRequest(table + query, { method: 'GET' });
+}
+
+async function sbUpsert(table, rows) {
+  return supabaseRequest(table, {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=minimal',
+    body: Array.isArray(rows) ? rows : [rows],
+    headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' }
+  });
+}
+
+async function sbDelete(table, query) {
+  return supabaseRequest(table + query, { method: 'DELETE' });
+}
+
 // ── State ──
-let db = null;
 let trackers = JSON.parse(JSON.stringify(STATIC)); // start with statics, db overrides
 let deletedStatics = new Set();  // ids of static trackers the user deleted
 let trackerOverrides = {};         // modifications des trackers statiques
@@ -328,37 +374,42 @@ let customTrackers = [];
 let categories = JSON.parse(JSON.stringify(DEFAULT_CATS));
 let activeFilter = 'all';
 
-// ── DB init ──
+// ── Supabase DB init ──
 async function initDB() {
   try {
-    db = await claude.use('db');
-    if (!db) { renderAll(); return; }
-
-    // Load deleted statics
+    // Deleted static trackers
     try {
-      const delSnap = await db.collection('meta').doc('deletedStatics').get();
-      if (delSnap.exists) deletedStatics = new Set(delSnap.data().ids || []);
-    } catch(e) {}
+      const rows = await sbGet('meta', '?select=id,data&id=eq.deletedStatics&limit=1');
+      if (rows?.length) deletedStatics = new Set(rows[0].data?.ids || []);
+    } catch(e) { console.warn('deletedStatics load:', e); }
 
-    // Load modifications des trackers statiques
+    // Static tracker overrides
     try {
-      const ovSnap = await db.collection('meta').doc('trackerOverrides').get();
-      if (ovSnap.exists) trackerOverrides = ovSnap.data().list || {};
-    } catch(e) {}
+      const rows = await sbGet('meta', '?select=id,data&id=eq.trackerOverrides&limit=1');
+      if (rows?.length) trackerOverrides = rows[0].data?.list || {};
+    } catch(e) { console.warn('trackerOverrides load:', e); }
 
-    // Load categories
+    // Categories
     try {
-      const catSnap = await db.collection('meta').doc('categories').get();
-      if (catSnap.exists) categories = catSnap.data().list || DEFAULT_CATS;
-    } catch(e) {}
+      const rows = await sbGet('meta', '?select=id,data&id=eq.categories&limit=1');
+      if (rows?.length && Array.isArray(rows[0].data?.list)) {
+        categories = rows[0].data.list;
+      }
+    } catch(e) { console.warn('categories load:', e); }
 
-    // Load custom trackers
+    // Custom trackers
     try {
-      const snap = await db.collection('trackers').get();
-      customTrackers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    } catch(e) {}
+      const rows = await sbGet('trackers', '?select=id,url,img,tags&order=id.asc');
+      customTrackers = (rows || []).map(d => ({
+        id: d.id, url: d.url || '', img: d.img || '', tags: d.tags || 'other'
+      }));
+    } catch(e) { console.warn('trackers load:', e); }
 
-  } catch(e) { console.warn('DB unavailable', e); }
+  } catch(e) {
+    console.warn('Supabase unavailable:', e);
+    showToast('⚠ Supabase indisponible');
+  }
+
   renderAll();
 }
 
@@ -435,11 +486,11 @@ function renderGrid() {
       if (!confirm('Supprimer ce tracker ?')) return;
       try {
         if (isCustom) {
-          if (db) await db.collection('trackers').doc(t.id).delete();
+          await sbDelete('trackers', '?id=eq.' + encodeURIComponent(t.id));
           customTrackers = customTrackers.filter(x => x.id !== t.id);
         } else {
           deletedStatics.add(t.id);
-          if (db) await db.collection('meta').doc('deletedStatics').set({ ids: [...deletedStatics] });
+          await sbUpsert('meta', { id: 'deletedStatics', data: { ids: [...deletedStatics] } });
         }
         renderGrid();
         showToast('Tracker supprimé');
@@ -513,7 +564,7 @@ document.getElementById('saveTracker').addEventListener('click', async () => {
   const t = { id, url, img, tags };
 
   try {
-    if (db) await db.collection('trackers').doc(id).set({ url, img, tags });
+    await sbUpsert('trackers', { id, url, img, tags });
     customTrackers.push(t);
     renderGrid();
     closeAddModal();
@@ -598,16 +649,12 @@ document.getElementById('saveEdit').addEventListener('click', async () => {
   try {
     if (editingTrackerId.startsWith('s')) {
       trackerOverrides[editingTrackerId] = { url, img, tags };
-      if (db) {
-        await db.collection('meta').doc('trackerOverrides').set({ list: trackerOverrides });
-      }
+      await sbUpsert('meta', { id: 'trackerOverrides', data: { list: trackerOverrides } });
     } else {
       const index = customTrackers.findIndex(x => x.id === editingTrackerId);
       if (index !== -1) {
         customTrackers[index] = { ...customTrackers[index], url, img, tags };
-        if (db) {
-          await db.collection('trackers').doc(editingTrackerId).set({ url, img, tags });
-        }
+        await sbUpsert('trackers', { id: editingTrackerId, url, img, tags });
       }
     }
 
@@ -715,7 +762,7 @@ document.getElementById('newCatInput').addEventListener('keydown', e => {
 });
 
 async function saveCats() {
-  try { if (db) await db.collection('meta').doc('categories').set({ list: categories }); }
+  try { await sbUpsert('meta', { id: 'categories', data: { list: categories } }); }
   catch(e) { console.warn('saveCats error', e); }
 }
 
