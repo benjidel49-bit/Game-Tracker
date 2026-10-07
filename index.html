@@ -93,6 +93,7 @@ header{position:sticky;top:env(safe-area-inset-top,0px);z-index:100;
 .card:hover .card-img{filter:brightness(1)}
 .card-actions{position:absolute;top:6px;right:6px;display:flex;gap:4px;opacity:0;transition:opacity .15s}
 .card:hover .card-actions{opacity:1}
+@media(hover:none){.card-actions{opacity:1}.card-edit,.card-delete{width:32px;height:32px;font-size:14px}}
 .card-edit,.card-delete{background:rgba(0,0,0,.78);
   border:1px solid rgba(255,255,255,.15);font-size:12px;
   width:26px;height:26px;border-radius:50%;cursor:pointer;
@@ -109,7 +110,7 @@ header{position:sticky;top:env(safe-area-inset-top,0px);z-index:100;
 .overlay.open{opacity:1;pointer-events:all}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:8px;
   padding:2rem;width:100%;max-width:460px;
-  transform:translateY(12px);transition:transform .2s;max-height:90vh;overflow-y:auto}
+  transform:translateY(12px);transition:transform .2s;max-height:90vh;max-height:90dvh;overflow-y:auto}
 .overlay.open .modal{transform:translateY(0)}
 .modal h2{font-family:'Rajdhani',sans-serif;font-size:1.4rem;font-weight:700;margin-bottom:1.5rem}
 
@@ -172,8 +173,11 @@ footer{border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center
 .card.hidden{display:none}
 
 @media(max-width:640px){
-  header{padding:0 1rem}
-  .search-bar{width:130px}
+  header{padding:8px 1rem;height:auto;min-height:60px;flex-wrap:wrap;gap:8px}
+  .header-right{width:100%}
+  .search-bar{flex:1;width:auto;min-width:0}
+  .overlay{align-items:flex-start;overflow-y:auto}
+  .modal{margin-top:.5rem;padding:1.25rem}
   .hero,.featured,.grid-section{padding-left:1rem;padding-right:1rem}
   .featured-card{flex-direction:column;height:auto}
   .featured-img{width:100%;height:160px}
@@ -327,77 +331,77 @@ let customTrackers = [];
 let categories = JSON.parse(JSON.stringify(DEFAULT_CATS));
 let activeFilter = 'all';
 
-const SUPABASE_URL = 'https://srahvrjmcancnysirpgq.supabase.co'; 
-const SUPABASE_KEY = 'sb_publishable_4J_AmUc8doQ4R9zatcLHMQ_jKVzUYxN'; 
-const SUPABASE_HEADERS = { 
-  apikey: SUPABASE_KEY, 
-  Authorization: `Bearer ${SUPABASE_KEY}`, 
-  'Content-Type': 'application/json' 
+const SUPABASE_URL = 'https://srahvrjmcancnysirpgq.supabase.co'; 
+const SUPABASE_KEY = 'sb_publishable_4J_AmUc8doQ4R9zatcLHMQ_jKVzUYxN'; 
+const SUPABASE_HEADERS = { 
+  apikey: SUPABASE_KEY, 
+  Authorization: `Bearer ${SUPABASE_KEY}`, 
+  'Content-Type': 'application/json' 
 }; 
-async function supabaseRequest(path, options = {}) { 
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { 
-    ...options, 
-    headers: { 
-      ...SUPABASE_HEADERS, 
-      ...(options.headers || {}) 
-    } 
-  }); 
-  if (!response.ok) { 
-    const body = await response.text(); 
-    throw new Error(`Supabase ${response.status}: ${body}`); 
-  } 
-  if (response.status === 204) return null; 
-  const contentType = response.headers.get('content-type') || ''; 
-  return contentType.includes('application/json') 
-    ? response.json() 
-    : null; 
+async function supabaseRequest(path, options = {}) { 
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { 
+    ...options, 
+    headers: { 
+      ...SUPABASE_HEADERS, 
+      ...(options.headers || {}) 
+    } 
+  }); 
+  if (!response.ok) { 
+    const body = await response.text(); 
+    throw new Error(`Supabase ${response.status}: ${body}`); 
+  } 
+  if (response.status === 204) return null; 
+  const contentType = response.headers.get('content-type') || ''; 
+  return contentType.includes('application/json') 
+    ? response.json() 
+    : null; 
 } 
-async function saveMeta(key, value) { 
-  await supabaseRequest('meta?on_conflict=key', { 
-    method: 'POST', 
-    headers: { 
-      Prefer: 'resolution=merge-duplicates,return=minimal' 
-    }, 
-    body: JSON.stringify({ key, value }) 
-  }); 
+async function saveMeta(key, value) { 
+  await supabaseRequest('meta?on_conflict=key', { 
+    method: 'POST', 
+    headers: { 
+      Prefer: 'resolution=merge-duplicates,return=minimal' 
+    }, 
+    body: JSON.stringify({ key, value }) 
+  }); 
 } 
-async function initDB() { 
-  try { 
-    const rows = await supabaseRequest( 
-      'trackers?select=id,url,img,tags&order=created_at.asc' 
-    ); 
-    customTrackers = (rows || []).map(d => ({ 
-      id: d.id, 
-      url: d.url, 
-      img: d.img || '', 
-      tags: d.tags || 'other' 
-    })); 
-    try { 
-      const metaRows = await supabaseRequest('meta?select=key,value'); 
-      (metaRows || []).forEach(row => { 
-        if (row.key === 'deletedStatics') { 
-          deletedStatics = new Set( 
-            Array.isArray(row.value?.ids) ? row.value.ids : [] 
-          ); 
-        } 
-        if (row.key === 'trackerOverrides') { 
-          trackerOverrides = row.value?.list || {}; 
-        } 
-        if (row.key === 'categories') { 
-          categories = Array.isArray(row.value?.list) 
-            ? row.value.list 
-            : DEFAULT_CATS; 
-        } 
-      }); 
-    } catch (e) { 
-      console.warn('Métadonnées Supabase indisponibles:', e); 
-    } 
-    console.log('Supabase connecté'); 
-  } catch (e) { 
-    console.error('Supabase indisponible:', e); 
-    showToast('⚠ Impossible de charger les trackers sauvegardés'); 
-  } 
-  renderAll(); 
+async function initDB() { 
+  try { 
+    const rows = await supabaseRequest( 
+      'trackers?select=id,url,img,tags&order=created_at.asc' 
+    ); 
+    customTrackers = (rows || []).map(d => ({ 
+      id: d.id, 
+      url: d.url, 
+      img: d.img || '', 
+      tags: d.tags || 'other' 
+    })); 
+    try { 
+      const metaRows = await supabaseRequest('meta?select=key,value'); 
+      (metaRows || []).forEach(row => { 
+        if (row.key === 'deletedStatics') { 
+          deletedStatics = new Set( 
+            Array.isArray(row.value?.ids) ? row.value.ids : [] 
+          ); 
+        } 
+        if (row.key === 'trackerOverrides') { 
+          trackerOverrides = row.value?.list || {}; 
+        } 
+        if (row.key === 'categories') { 
+          categories = Array.isArray(row.value?.list) 
+            ? row.value.list 
+            : DEFAULT_CATS; 
+        } 
+      }); 
+    } catch (e) { 
+      console.warn('Métadonnées Supabase indisponibles:', e); 
+    } 
+    console.log('Supabase connecté'); 
+  } catch (e) { 
+    console.error('Supabase indisponible:', e); 
+    showToast('⚠ Impossible de charger les trackers sauvegardés'); 
+  } 
+  renderAll(); 
 } 
 
 // ── Compute all trackers ──
@@ -488,7 +492,7 @@ function renderGrid() {
         }
         renderGrid();
         showToast('Tracker supprimé');
-      } catch(err) { showToast('Erreur suppression'); }
+      } catch(err) { console.error(err); showToast('Erreur suppression : ' + describeError(err).slice(0,80)); }
     });
 
     actions.appendChild(edit);
@@ -550,7 +554,7 @@ document.getElementById('saveTracker').addEventListener('click', async () => {
   const url  = document.getElementById('inp-url').value.trim();
   const img  = document.getElementById('inp-img').value.trim();
   const tags = document.getElementById('inp-cat').value;
-  if (!url) { document.getElementById('errMsg').style.display = 'block'; return; }
+  if (!url) { const e = document.getElementById('errMsg'); e.textContent = 'Veuillez remplir le lien du fichier.'; e.style.display = 'block'; return; }
 
   const btn = document.getElementById('saveTracker');
   btn.disabled = true; btn.textContent = 'Ajout…';
@@ -558,17 +562,17 @@ document.getElementById('saveTracker').addEventListener('click', async () => {
   const t = { id, url, img, tags };
 
   try {
-    await supabaseRequest('trackers', { 
-	  method: 'POST', 
-  	headers: { 
- 	   Prefer: 'return=minimal' 
-  }, 
-  	body: JSON.stringify({ 
-  	  id, 
- 	   url, 
-   	 img, 
-  	  tags 
-  }) 
+    await supabaseRequest('trackers', { 
+	  method: 'POST', 
+  	headers: { 
+ 	   Prefer: 'return=minimal' 
+  }, 
+  	body: JSON.stringify({ 
+  	  id, 
+ 	   url, 
+   	 img, 
+  	  tags 
+  }) 
 }); 
     customTrackers.push(t);
     renderGrid();
@@ -576,6 +580,9 @@ document.getElementById('saveTracker').addEventListener('click', async () => {
     showToast('✓ Tracker ajouté !');
   } catch(err) {
   console.error('Erreur ajout tracker:', err);
+  const e = document.getElementById('errMsg');
+  e.textContent = 'Non sauvegardé : ' + describeError(err);
+  e.style.display = 'block';
   showToast('❌ Tracker non sauvegardé');
   } finally { btn.disabled = false; btn.textContent = 'Ajouter'; }
 });
@@ -641,7 +648,9 @@ document.getElementById('saveEdit').addEventListener('click', async () => {
   const tags = document.getElementById('edit-cat').value;
 
   if (!url) {
-    document.getElementById('editErrMsg').style.display = 'block';
+    const e = document.getElementById('editErrMsg');
+    e.textContent = 'Veuillez remplir le lien du fichier.';
+    e.style.display = 'block';
     return;
   }
 
@@ -681,6 +690,10 @@ document.getElementById('saveEdit').addEventListener('click', async () => {
     closeEditModal();
     showToast('✓ Tracker modifié !');
   } catch(err) {
+    console.error('Erreur modification:', err);
+    const e = document.getElementById('editErrMsg');
+    e.textContent = 'Non sauvegardé : ' + describeError(err);
+    e.style.display = 'block';
     showToast('Erreur lors de la modification');
   } finally {
     btn.disabled = false;
@@ -799,6 +812,15 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// ── Erreur détaillée (visible sur mobile, sans console) ──
+function describeError(err) {
+  const m = (err && err.message) ? err.message : String(err);
+  if (/Load failed|Failed to fetch|NetworkError/i.test(m)) {
+    return 'Connexion à Supabase impossible (réseau, VPN, bloqueur de pub ou navigateur intégré à une appli). [' + m + ']';
+  }
+  return m.length > 300 ? m.slice(0, 300) + '…' : m;
+}
+
 // ── Toast ──
 function showToast(msg) {
   const t = document.getElementById('toast');
@@ -812,41 +834,11 @@ initDB();
 </script>
 
 <script>
-/*
- * Mise à jour PWA / mobile
- * Nettoie une ancienne version du Service Worker qui peut servir
- * un vieux index.html sur smartphone.
- */
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', async () => {
-    try {
-      const KEY = 'game-trackers-sw-clean-v2';
-
-      if (!sessionStorage.getItem(KEY)) {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-
-        for (const registration of registrations) {
-          await registration.unregister();
-        }
-
-        if ('caches' in window) {
-          const cacheNames = await caches.keys();
-          await Promise.all(cacheNames.map(name => caches.delete(name)));
-        }
-
-        sessionStorage.setItem(KEY, '1');
-
-        // Recharge une seule fois avec la version fraîche de la page.
-        window.location.reload();
-        return;
-      }
-
-      // Après le nettoyage, on peut réenregistrer le SW.
-      const registration = await navigator.serviceWorker.register('./sw.js');
-      await registration.update();
-    } catch (err) {
-      console.warn('Mise à jour PWA non disponible:', err);
-    }
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(err => {
+      console.warn('Service Worker non disponible:', err);
+    });
   });
 }
 </script>
