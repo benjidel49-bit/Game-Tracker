@@ -135,6 +135,28 @@ header{position:sticky;top:env(safe-area-inset-top,0px);z-index:100;
 .btn-save:hover{background:var(--accent2)}
 .btn-save:disabled{opacity:.5;cursor:not-allowed}
 
+/* Manage categories modal */
+.cat-list{display:flex;flex-direction:column;gap:8px;margin-bottom:1rem}
+.cat-item{display:flex;align-items:center;justify-content:space-between;
+  background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px}
+.cat-item-name{font-family:'Rajdhani',sans-serif;font-weight:600;font-size:.95rem}
+.cat-item-controls{display:flex;align-items:center;gap:3px}
+.cat-item-move,.cat-item-del{background:none;border:none;color:var(--muted);cursor:pointer;
+  font-size:13px;padding:3px 6px;border-radius:var(--radius);transition:color .15s,background .15s}
+.cat-item-move:hover{color:var(--accent);background:rgba(74,222,128,.1)}
+.cat-item-move.disabled{opacity:.25;cursor:not-allowed;pointer-events:none}
+.cat-item-del:hover{color:var(--danger);background:rgba(248,113,113,.1)}
+.cat-item-del.disabled{opacity:.3;cursor:not-allowed;pointer-events:none}
+.add-cat-row{display:flex;gap:8px}
+.add-cat-row input{flex:1;background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius);padding:8px 12px;color:var(--text);
+  font-family:'Inter',sans-serif;font-size:.875rem;outline:none}
+.add-cat-row input:focus{border-color:rgba(74,222,128,.5)}
+.btn-cat-add{background:var(--accent);color:#000;font-family:'Rajdhani',sans-serif;
+  font-size:.8rem;font-weight:700;padding:8px 14px;border-radius:var(--radius);
+  border:none;cursor:pointer;white-space:nowrap}
+.btn-cat-add:hover{background:var(--accent2)}
+
 /* Toast */
 .toast{position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 1.5rem);left:50%;
   transform:translateX(-50%) translateY(8px);background:var(--surface);
@@ -169,6 +191,7 @@ footer{border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center
       <span style="color:var(--muted);font-size:14px">🔍</span>
       <input type="text" id="searchInput" placeholder="Rechercher…">
     </div>
+    <button class="btn btn-manage" id="openManageCat">⚙ <span>Catégories</span></button>
     <button class="btn btn-add" id="openModal">+ Ajouter</button>
   </div>
 </header>
@@ -198,6 +221,7 @@ footer{border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center
 
 <section class="grid-section">
   <div class="section-label">TOUS LES TRACKERS</div>
+  <div class="filter-bar" id="filterBar"></div>
   <div class="grid" id="grid"></div>
   <p id="emptyMsg" style="display:none;color:var(--muted);font-size:.85rem;padding:2rem 0">Aucun tracker trouvé.</p>
 </section>
@@ -217,6 +241,10 @@ footer{border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center
       <input type="text" id="inp-img" placeholder="https://cdn2.steamgriddb.com/…">
       <p class="field-hint">Conseil : trouvez l'image sur <a href="https://www.steamgriddb.com" target="_blank" style="color:var(--accent)">SteamGridDB</a></p>
       <img id="imgPreview" class="preview-img" src="" alt="" style="display:none">
+    </div>
+    <div class="field">
+      <label>CATÉGORIE</label>
+      <select id="inp-cat"></select>
     </div>
     <p class="error-msg" id="errMsg">Veuillez remplir le lien du fichier.</p>
     <div class="modal-actions">
@@ -239,6 +267,10 @@ footer{border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center
       <input type="text" id="edit-img" placeholder="https://…">
       <img id="editImgPreview" class="preview-img" src="" alt="" style="display:none">
     </div>
+    <div class="field">
+      <label>CATÉGORIE</label>
+      <select id="edit-cat"></select>
+    </div>
     <p class="error-msg" id="editErrMsg">Veuillez remplir le lien du fichier.</p>
     <div class="modal-actions">
       <button class="btn-cancel" id="closeEdit">Annuler</button>
@@ -247,22 +279,44 @@ footer{border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center
   </div>
 </div>
 
+<!-- Modal gestion catégories -->
+<div class="overlay" id="overlayCat">
+  <div class="modal">
+    <h2>Gérer les catégories</h2>
+    <div class="cat-list" id="catList"></div>
+    <div class="add-cat-row">
+      <input type="text" id="newCatInput" placeholder="Nouvelle catégorie…">
+      <button class="btn-cat-add" id="addCatBtn">Ajouter</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-save" id="closeCat">Fermer</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
+const DEFAULT_CATS = [
+  { id:'all',    label:'Tous' },
+  { id:'digimon',label:'Digimon' },
+  { id:'pokemon',label:'Pokémon' },
+  { id:'ff',     label:'Final Fantasy' },
+  { id:'other',  label:'Autres' },
+];
 
 const STATIC = [
-  { id:'s1', url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/Documents/Documents/Test/Digimon%20Time%20Stranger.xlsx?d=w2466c87b535149f1baa0726a3577c264&csf=1&web=1&e=3uKmkb', img:'https://cdn2.steamgriddb.com/grid/7fd323a94f363b73b8ec1339915ee575.png' },
-  { id:'s2',      url:'https://groupepvcp-my.sharepoint.com/:x:/p/benjamin_beaufils/IQDzl_ds_qOhTLcrDxmARptGAZo6pxHP1Dh_z2CK8Jxs1yo?email=benjamin.beaufils%40groupepvcp.com&e=EfR0jf', img:'https://cdn2.steamgriddb.com/grid/388dfbe01d4b300884259ede6c5bca84.jpg' },
-  { id:'s3',   url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7B322DD3FC-F607-4D27-B03A-35ED91B20C9C%7D&file=Smash%20Tracker.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/2ef85f2ae5e56041ded26f67e18136be.png' },
-  { id:'s4', url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7B1B89D299-1F6E-44A3-9E67-9A35238FB86C%7D&file=Pokopia.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/0f78d889461190857b379ce9b2e063a7.png' },
-  { id:'s5',      url:'https://groupepvcp-my.sharepoint.com/:x:/p/benjamin_beaufils/IQDK0Xe4KjFQTbYaN9u89OL8ARt2tXpmUi5noRSno2qkG14?email=benjamin.beaufils%40groupepvcp.com&e=nlDQ2S', img:'https://cdn2.steamgriddb.com/grid/8926645de0f0c17b25e116b3355aa1c2.jpg' },
-  { id:'s6',   url:'https://groupepvcp-my.sharepoint.com/:x:/p/benjamin_beaufils/IQAeX-4zyN1XTp572arCevexATmMmxx8sfS5j7VfT-FTbvw?email=benjamin.beaufils%40groupepvcp.com&e=2NDczo', img:'https://cdn2.steamgriddb.com/grid/27b13bb902631bcfeacb1fc53480c101.png' },
-  { id:'s7',   url:'https://groupepvcp-my.sharepoint.com/:x:/p/benjamin_beaufils/IQC6ICZ23yBeT6eHHp91lRDpAfnbG011Si0ZuRb_XfQdhKg?email=benjamin.beaufils%40groupepvcp.com&e=SEXqTt', img:'https://cdn2.steamgriddb.com/grid/5fdacd92600fcc2bc6fe136b85fd7ed6.png' },
-  { id:'s8', url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7B8D477793-F115-437B-8E0A-93A8C2FA2039%7D&file=New%20Pokemon%20Snap%20Tracker%202.0%20-%20Editable.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/e5dfb4adfeca91aec4ed4d4f3001bdf0.png' },
-  { id:'s9', url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7B41250A90-8CC7-4AB4-92D5-67E18FE11D39%7D&file=Digivolution%20Guide.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/0d79a6eb53b67ace5036b27bee3488c3.png' },
-  { id:'s10',   url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7B152779EF-2BFF-4819-B85B-A37ECD788C00%7D&file=Skyrim%20Tracker.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/15f2f3212f3fac99adeb5f8f85087bf2.jpg' },
-  { id:'s11',   url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7BA0CEAFE3-EACE-44C1-945B-0A6652C4B5AA%7D&file=Liste%20des%20Techniques%20Xv2.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/873e8ec7325c385c755c85d0314299e9.jpg' },
+  { id:'s1', tags:'digimon', url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/Documents/Documents/Test/Digimon%20Time%20Stranger.xlsx?d=w2466c87b535149f1baa0726a3577c264&csf=1&web=1&e=3uKmkb', img:'https://cdn2.steamgriddb.com/grid/7fd323a94f363b73b8ec1339915ee575.png' },
+  { id:'s2', tags:'ff',      url:'https://groupepvcp-my.sharepoint.com/:x:/p/benjamin_beaufils/IQDzl_ds_qOhTLcrDxmARptGAZo6pxHP1Dh_z2CK8Jxs1yo?email=benjamin.beaufils%40groupepvcp.com&e=EfR0jf', img:'https://cdn2.steamgriddb.com/grid/388dfbe01d4b300884259ede6c5bca84.jpg' },
+  { id:'s3', tags:'other',   url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7B322DD3FC-F607-4D27-B03A-35ED91B20C9C%7D&file=Smash%20Tracker.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/2ef85f2ae5e56041ded26f67e18136be.png' },
+  { id:'s4', tags:'pokemon', url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7B1B89D299-1F6E-44A3-9E67-9A35238FB86C%7D&file=Pokopia.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/0f78d889461190857b379ce9b2e063a7.png' },
+  { id:'s5', tags:'ff',      url:'https://groupepvcp-my.sharepoint.com/:x:/p/benjamin_beaufils/IQDK0Xe4KjFQTbYaN9u89OL8ARt2tXpmUi5noRSno2qkG14?email=benjamin.beaufils%40groupepvcp.com&e=nlDQ2S', img:'https://cdn2.steamgriddb.com/grid/8926645de0f0c17b25e116b3355aa1c2.jpg' },
+  { id:'s6', tags:'other',   url:'https://groupepvcp-my.sharepoint.com/:x:/p/benjamin_beaufils/IQAeX-4zyN1XTp572arCevexATmMmxx8sfS5j7VfT-FTbvw?email=benjamin.beaufils%40groupepvcp.com&e=2NDczo', img:'https://cdn2.steamgriddb.com/grid/27b13bb902631bcfeacb1fc53480c101.png' },
+  { id:'s7', tags:'other',   url:'https://groupepvcp-my.sharepoint.com/:x:/p/benjamin_beaufils/IQC6ICZ23yBeT6eHHp91lRDpAfnbG011Si0ZuRb_XfQdhKg?email=benjamin.beaufils%40groupepvcp.com&e=SEXqTt', img:'https://cdn2.steamgriddb.com/grid/5fdacd92600fcc2bc6fe136b85fd7ed6.png' },
+  { id:'s8', tags:'pokemon', url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7B8D477793-F115-437B-8E0A-93A8C2FA2039%7D&file=New%20Pokemon%20Snap%20Tracker%202.0%20-%20Editable.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/e5dfb4adfeca91aec4ed4d4f3001bdf0.png' },
+  { id:'s9', tags:'digimon', url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7B41250A90-8CC7-4AB4-92D5-67E18FE11D39%7D&file=Digivolution%20Guide.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/0d79a6eb53b67ace5036b27bee3488c3.png' },
+  { id:'s10',tags:'other',   url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7B152779EF-2BFF-4819-B85B-A37ECD788C00%7D&file=Skyrim%20Tracker.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/15f2f3212f3fac99adeb5f8f85087bf2.jpg' },
+  { id:'s11',tags:'other',   url:'https://groupepvcp-my.sharepoint.com/:x:/r/personal/benjamin_beaufils_groupepvcp_com/_layouts/15/Doc.aspx?sourcedoc=%7BA0CEAFE3-EACE-44C1-945B-0A6652C4B5AA%7D&file=Liste%20des%20Techniques%20Xv2.xlsx&action=default&mobileredirect=true', img:'https://cdn2.steamgriddb.com/grid/873e8ec7325c385c755c85d0314299e9.jpg' },
 ];
 
 // ── State ──
@@ -270,6 +324,8 @@ let trackers = JSON.parse(JSON.stringify(STATIC)); // start with statics, db ove
 let deletedStatics = new Set();  // ids of static trackers the user deleted
 let trackerOverrides = {};         // modifications des trackers statiques
 let customTrackers = [];
+let categories = JSON.parse(JSON.stringify(DEFAULT_CATS));
+let activeFilter = 'all';
 
 const SUPABASE_URL = 'https://srahvrjmcancnysirpgq.supabase.co'; 
 const SUPABASE_KEY = 'sb_publishable_4J_AmUc8doQ4R9zatcLHMQ_jKVzUYxN'; 
@@ -308,7 +364,7 @@ async function saveMeta(key, value) {
 async function initDB() { 
   try { 
     const rows = await supabaseRequest( 
-      'trackers?select=id,url,img&order=created_at.asc' 
+      'trackers?select=id,url,img,tags&order=created_at.asc' 
     ); 
     customTrackers = (rows || []).map(d => ({ 
       id: d.id, 
@@ -353,6 +409,25 @@ function allTrackers() {
     ...customTrackers
   ];
 }
+
+// ── Render filter bar ──
+function renderFilterBar() {
+  const bar = document.getElementById('filterBar');
+  bar.innerHTML = '';
+  categories.forEach(cat => {
+    const btn = document.createElement('button');
+    btn.className = 'filter-btn' + (cat.id === activeFilter ? ' active' : '');
+    btn.dataset.filter = cat.id;
+    btn.textContent = cat.label;
+    btn.addEventListener('click', () => {
+      activeFilter = cat.id;
+      renderFilterBar();
+      renderGrid();
+    });
+    bar.appendChild(btn);
+  });
+}
+
 // ── Render grid ──
 function renderGrid() {
   const grid = document.getElementById('grid');
@@ -361,8 +436,9 @@ function renderGrid() {
   let visible = 0;
 
   allTrackers().forEach(t => {
-    const matchSearch = !q || t.url.toLowerCase().includes(q);
-    if (!matchSearch) return;
+    const matchFilter = activeFilter === 'all' || (t.tags || 'other') === activeFilter;
+    const matchSearch = !q || (t.tags||'').includes(q) || t.url.toLowerCase().includes(q);
+    if (!matchFilter || !matchSearch) return;
 
     const isCustom = !t.id.startsWith('s');
     const card = document.createElement('a');
@@ -427,13 +503,27 @@ function renderGrid() {
   document.getElementById('emptyMsg').style.display = visible === 0 ? 'block' : 'none';
 }
 
-function renderAll() { renderGrid(); }
+function renderAll() { renderFilterBar(); renderGrid(); }
+
+// ── Populate category select in add modal ──
+function populateCatSelect() {
+  const sel = document.getElementById('inp-cat');
+  sel.innerHTML = '';
+  categories.filter(c => c.id !== 'all').forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.label;
+    sel.appendChild(opt);
+  });
+}
+
 // ── Search ──
 document.getElementById('searchInput').addEventListener('input', renderGrid);
 
 // ── Modal Add ──
 const overlayAdd = document.getElementById('overlayAdd');
 document.getElementById('openModal').addEventListener('click', () => {
+  populateCatSelect();
   overlayAdd.classList.add('open');
 });
 document.getElementById('closeAdd').addEventListener('click', () => closeAddModal());
@@ -459,12 +549,13 @@ document.getElementById('inp-img').addEventListener('input', e => {
 document.getElementById('saveTracker').addEventListener('click', async () => {
   const url  = document.getElementById('inp-url').value.trim();
   const img  = document.getElementById('inp-img').value.trim();
+  const tags = document.getElementById('inp-cat').value;
   if (!url) { document.getElementById('errMsg').style.display = 'block'; return; }
 
   const btn = document.getElementById('saveTracker');
   btn.disabled = true; btn.textContent = 'Ajout…';
   const id = 'c' + Date.now();
-  const t = { id, url, img };
+  const t = { id, url, img, tags };
 
   try {
     await supabaseRequest('trackers', { 
@@ -475,7 +566,8 @@ document.getElementById('saveTracker').addEventListener('click', async () => {
   	body: JSON.stringify({ 
   	  id, 
  	   url, 
-   	 img 
+   	 img, 
+  	  tags 
   }) 
 }); 
     customTrackers.push(t);
@@ -491,10 +583,24 @@ document.getElementById('saveTracker').addEventListener('click', async () => {
 // ── Modal Edit tracker ──
 const overlayEdit = document.getElementById('overlayEdit');
 let editingTrackerId = null;
+
+function populateEditCatSelect(selected) {
+  const sel = document.getElementById('edit-cat');
+  sel.innerHTML = '';
+  categories.filter(c => c.id !== 'all').forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.label;
+    if (c.id === selected) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
 function openEditModal(t) {
   editingTrackerId = t.id;
   document.getElementById('edit-url').value = t.url || '';
   document.getElementById('edit-img').value = t.img || '';
+  populateEditCatSelect(t.tags || 'other');
   document.getElementById('editErrMsg').style.display = 'none';
 
   const preview = document.getElementById('editImgPreview');
@@ -532,6 +638,7 @@ document.getElementById('edit-img').addEventListener('input', e => {
 document.getElementById('saveEdit').addEventListener('click', async () => {
   const url = document.getElementById('edit-url').value.trim();
   const img = document.getElementById('edit-img').value.trim();
+  const tags = document.getElementById('edit-cat').value;
 
   if (!url) {
     document.getElementById('editErrMsg').style.display = 'block';
@@ -544,14 +651,14 @@ document.getElementById('saveEdit').addEventListener('click', async () => {
 
   try {
     if (editingTrackerId.startsWith('s')) {
-      trackerOverrides[editingTrackerId] = { url, img };
+      trackerOverrides[editingTrackerId] = { url, img, tags };
       await saveMeta('trackerOverrides', {
   list: trackerOverrides
 });
     } else {
       const index = customTrackers.findIndex(x => x.id === editingTrackerId);
       if (index !== -1) {
-        customTrackers[index] = { ...customTrackers[index], url, img };
+        customTrackers[index] = { ...customTrackers[index], url, img, tags };
         await supabaseRequest(
   `trackers?id=eq.${encodeURIComponent(editingTrackerId)}`,
   {
@@ -562,6 +669,7 @@ document.getElementById('saveEdit').addEventListener('click', async () => {
     body: JSON.stringify({
       url,
       img,
+      tags,
       updated_at: new Date().toISOString()
     })
   }
@@ -577,6 +685,117 @@ document.getElementById('saveEdit').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Enregistrer';
+  }
+});
+
+// ── Modal Manage categories ──
+const overlayCat = document.getElementById('overlayCat');
+document.getElementById('openManageCat').addEventListener('click', () => {
+  renderCatList();
+  overlayCat.classList.add('open');
+});
+document.getElementById('closeCat').addEventListener('click', () => overlayCat.classList.remove('open'));
+overlayCat.addEventListener('click', e => { if (e.target === overlayCat) overlayCat.classList.remove('open'); });
+
+function renderCatList() {
+  const list = document.getElementById('catList');
+  list.innerHTML = '';
+
+  categories.forEach((cat, i) => {
+    const row = document.createElement('div');
+    row.className = 'cat-item';
+
+    const name = document.createElement('span');
+    name.className = 'cat-item-name';
+    name.textContent = cat.label;
+
+    const controls = document.createElement('div');
+    controls.className = 'cat-item-controls';
+
+    const up = document.createElement('button');
+    up.className = 'cat-item-move' + (i === 0 ? ' disabled' : '');
+    up.textContent = '↑';
+    up.title = 'Monter';
+    if (i > 0) {
+      up.addEventListener('click', async () => {
+        [categories[i - 1], categories[i]] = [categories[i], categories[i - 1]];
+        await saveCats();
+        renderCatList();
+        renderAll();
+      });
+    }
+
+    const down = document.createElement('button');
+    down.className = 'cat-item-move' + (i === categories.length - 1 ? ' disabled' : '');
+    down.textContent = '↓';
+    down.title = 'Descendre';
+    if (i < categories.length - 1) {
+      down.addEventListener('click', async () => {
+        [categories[i], categories[i + 1]] = [categories[i + 1], categories[i]];
+        await saveCats();
+        renderCatList();
+        renderAll();
+      });
+    }
+
+    const del = document.createElement('button');
+    del.className = 'cat-item-del' + (cat.id === 'all' ? ' disabled' : '');
+    del.textContent = '✕';
+    del.title = cat.id === 'all' ? 'Ne peut pas être supprimé' : 'Supprimer';
+
+    if (cat.id !== 'all') {
+      del.addEventListener('click', async () => {
+        categories = categories.filter(c => c.id !== cat.id);
+        if (activeFilter === cat.id) activeFilter = 'all';
+        await saveCats();
+        renderCatList();
+        renderAll();
+        showToast('Catégorie supprimée');
+      });
+    }
+
+    controls.appendChild(up);
+    controls.appendChild(down);
+    controls.appendChild(del);
+    row.appendChild(name);
+    row.appendChild(controls);
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('addCatBtn').addEventListener('click', async () => {
+  const inp = document.getElementById('newCatInput');
+  const label = inp.value.trim();
+  if (!label) return;
+  const id = label.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'') + '-' + Date.now();
+  categories.push({ id, label });
+  await saveCats();
+  inp.value = '';
+  renderCatList();
+  renderAll();
+  showToast('Catégorie "' + label + '" ajoutée');
+});
+
+document.getElementById('newCatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('addCatBtn').click();
+});
+
+async function saveCats() {
+  try {
+    await saveMeta('categories', {
+      list: categories
+    });
+  } catch(e) {
+    console.warn('saveCats error', e);
+    showToast('Erreur sauvegarde catégories');
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (overlayEdit.classList.contains('open')) closeEditModal();
+    if (overlayAdd.classList.contains('open')) closeAddModal();
+    if (overlayCat.classList.contains('open')) overlayCat.classList.remove('open');
   }
 });
 
