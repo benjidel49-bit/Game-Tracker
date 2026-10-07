@@ -400,6 +400,7 @@ async function initDB() {
   } catch (e) { 
     console.error('Supabase indisponible:', e); 
     showToast('⚠ Impossible de charger les trackers sauvegardés'); 
+    showBanner('Diagnostic : ' + describeError(e) + ' | page : ' + location.protocol + '//' + (location.host || 'fichier local') + ' | en ligne : ' + navigator.onLine);
   } 
   renderAll(); 
 } 
@@ -819,6 +820,18 @@ function describeError(err) {
     return 'Connexion à Supabase impossible (réseau, VPN, bloqueur de pub ou navigateur intégré à une appli). [' + m + ']';
   }
   return m.length > 300 ? m.slice(0, 300) + '…' : m;
+}
+
+// ── Bandeau d'erreur persistant ──
+function showBanner(msg) {
+  let b = document.getElementById('errBanner');
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'errBanner';
+    b.style.cssText = 'background:#3b1219;color:#fca5a5;border:1px solid #f87171;padding:10px 14px;margin:8px 1rem;border-radius:4px;font-size:.78rem;word-break:break-word;font-family:Inter,sans-serif';
+    document.querySelector('header').insertAdjacentElement('afterend', b);
+  }
+  b.textContent = msg;
 }
 
 // ── Toast ──
