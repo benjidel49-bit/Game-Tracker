@@ -103,6 +103,21 @@ header{position:sticky;top:env(safe-area-inset-top,0px);z-index:100;
 .card-delete{color:var(--danger)}
 .card-delete:hover{background:rgba(248,113,113,.2)}
 
+/* Reorder mode */
+.card-handle{display:none;position:absolute;top:6px;left:6px;z-index:2;width:34px;height:34px;
+  border-radius:50%;background:rgba(0,0,0,.8);border:1px solid var(--accent);color:var(--accent);
+  align-items:center;justify-content:center;font-size:18px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+body.reorder .card-handle{display:flex}
+body.reorder .card-actions{display:none!important}
+body.reorder .card{border-style:dashed;border-color:rgba(74,222,128,.35)}
+body.reorder .card:hover{transform:none}
+.card.dragging{opacity:.55;border-color:var(--accent);border-style:solid;transform:scale(1.04);z-index:5;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+body.dragging-active{user-select:none;-webkit-user-select:none;cursor:grabbing}
+.btn-manage.active{color:#000;background:var(--accent);border-color:var(--accent)}
+.reorder-hint{display:none;color:var(--accent);font-size:.78rem;margin-bottom:1rem;
+  background:rgba(74,222,128,.07);border:1px solid rgba(74,222,128,.25);border-radius:var(--radius);padding:8px 12px}
+body.reorder .reorder-hint{display:block}
+
 /* Modals */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:200;
   display:flex;align-items:center;justify-content:center;
@@ -195,6 +210,7 @@ footer{border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center
       <span style="color:var(--muted);font-size:14px">🔍</span>
       <input type="text" id="searchInput" placeholder="Rechercher…">
     </div>
+    <button class="btn btn-manage" id="toggleReorder" title="Réorganiser les trackers">⇅ <span>Réorganiser</span></button>
     <button class="btn btn-manage" id="openManageCat">⚙ <span>Catégories</span></button>
     <button class="btn btn-add" id="openModal">+ Ajouter</button>
   </div>
@@ -226,6 +242,7 @@ footer{border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center
 <section class="grid-section">
   <div class="section-label">TOUS LES TRACKERS</div>
   <div class="filter-bar" id="filterBar"></div>
+  <div class="reorder-hint">Maintiens et glisse la poignée ⠿ d'une carte pour la déplacer. Clique sur « Terminé » quand tu as fini.</div>
   <div class="grid" id="grid"></div>
   <p id="emptyMsg" style="display:none;color:var(--muted);font-size:.85rem;padding:2rem 0">Aucun tracker trouvé.</p>
 </section>
@@ -328,6 +345,8 @@ let trackers = JSON.parse(JSON.stringify(STATIC)); // start with statics, db ove
 let deletedStatics = new Set();  // ids of static trackers the user deleted
 let trackerOverrides = {};         // modifications des trackers statiques
 let customTrackers = [];
+let trackerOrder = [];             // ordre personnalisé (liste d'ids)
+let reorderMode = false;
 let categories = JSON.parse(JSON.stringify(DEFAULT_CATS));
 let activeFilter = 'all';
 
@@ -387,6 +406,9 @@ async function initDB() {
         if (row.key === 'trackerOverrides') { 
           trackerOverrides = row.value?.list || {}; 
         } 
+        if (row.key === 'trackerOrder') {
+          trackerOrder = Array.isArray(row.value?.ids) ? row.value.ids : [];
+        }
         if (row.key === 'categories') { 
           categories = Array.isArray(row.value?.list) 
             ? row.value.list 
@@ -407,12 +429,18 @@ async function initDB() {
 
 // ── Compute all trackers ──
 function allTrackers() {
-  return [
+  const list = [
     ...STATIC
       .filter(t => !deletedStatics.has(t.id))
       .map(t => ({ ...t, ...(trackerOverrides[t.id] || {}) })),
     ...customTrackers
   ];
+  // Applique l'ordre personnalisé ; les trackers inconnus (nouveaux) restent à la fin
+  const pos = new Map(trackerOrder.map((id, i) => [id, i]));
+  return list
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => (pos.has(a.t.id) ? pos.get(a.t.id) : 1e6 + a.i) - (pos.has(b.t.id) ? pos.get(b.t.id) : 1e6 + b.i))
+    .map(x => x.t);
 }
 
 // ── Render filter bar ──
@@ -450,6 +478,16 @@ function renderGrid() {
     card.className = 'card';
     card.href = t.url;
     card.target = '_blank';
+    card.dataset.id = t.id;
+    card.addEventListener('click', e => { if (reorderMode) e.preventDefault(); });
+    card.draggable = false;
+
+    const handle = document.createElement('div');
+    handle.className = 'card-handle';
+    handle.title = 'Glisser pour déplacer';
+    handle.textContent = '⠿';
+    handle.addEventListener('pointerdown', e => startDrag(e, card));
+    handle.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); });
 
     const img = document.createElement('img');
     img.className = 'card-img';
@@ -500,6 +538,7 @@ function renderGrid() {
     actions.appendChild(del);
     card.appendChild(img);
     card.appendChild(actions);
+    card.appendChild(handle);
     grid.appendChild(card);
     visible++;
   });
@@ -524,6 +563,82 @@ function populateCatSelect() {
 
 // ── Search ──
 document.getElementById('searchInput').addEventListener('input', renderGrid);
+
+// ── Réorganisation (glisser-déposer, souris + tactile) ──
+const reorderBtn = document.getElementById('toggleReorder');
+reorderBtn.addEventListener('click', () => {
+  reorderMode = !reorderMode;
+  document.body.classList.toggle('reorder', reorderMode);
+  reorderBtn.classList.toggle('active', reorderMode);
+  reorderBtn.innerHTML = reorderMode ? '✓ <span>Terminé</span>' : '⇅ <span>Réorganiser</span>';
+});
+
+let drag = null;
+function startDrag(e, card) {
+  if (!reorderMode) return;
+  e.preventDefault();
+  drag = { card, pointerId: e.pointerId, x: e.clientX, y: e.clientY, raf: null };
+  card.classList.add('dragging');
+  document.body.classList.add('dragging-active');
+  document.addEventListener('pointermove', onDragMove);
+  document.addEventListener('pointerup', endDrag);
+  document.addEventListener('pointercancel', endDrag);
+  drag.raf = requestAnimationFrame(dragTick);
+}
+
+function onDragMove(e) {
+  if (!drag || e.pointerId !== drag.pointerId) return;
+  e.preventDefault();
+  drag.x = e.clientX; drag.y = e.clientY;
+}
+
+function dragTick() {
+  if (!drag) return;
+  const { card, x, y } = drag;
+  // défilement automatique près des bords
+  const edge = 70;
+  if (y < edge) window.scrollBy(0, -12);
+  else if (y > window.innerHeight - edge) window.scrollBy(0, 12);
+
+  card.style.pointerEvents = 'none';
+  const under = document.elementFromPoint(x, y);
+  card.style.pointerEvents = '';
+  const target = under && under.closest ? under.closest('#grid .card') : null;
+  if (target && target !== card) {
+    const grid = card.parentNode;
+    const kids = [...grid.children];
+    if (kids.indexOf(card) < kids.indexOf(target)) grid.insertBefore(card, target.nextSibling);
+    else grid.insertBefore(card, target);
+  }
+  drag.raf = requestAnimationFrame(dragTick);
+}
+
+async function endDrag() {
+  if (!drag) return;
+  cancelAnimationFrame(drag.raf);
+  drag.card.classList.remove('dragging');
+  document.body.classList.remove('dragging-active');
+  document.removeEventListener('pointermove', onDragMove);
+  document.removeEventListener('pointerup', endDrag);
+  document.removeEventListener('pointercancel', endDrag);
+  drag = null;
+
+  // Ordre visible (filtre/recherche éventuels) -> réinjecté dans l'ordre global
+  const visibleIds = [...document.querySelectorAll('#grid .card')].map(c => c.dataset.id);
+  const full = allTrackers().map(t => t.id);
+  const visibleSet = new Set(visibleIds);
+  let k = 0;
+  const merged = full.map(id => visibleSet.has(id) ? visibleIds[k++] : id);
+  if (merged.join('|') === full.join('|') && trackerOrder.length) return;
+  trackerOrder = merged;
+  try {
+    await saveMeta('trackerOrder', { ids: trackerOrder });
+    showToast('✓ Ordre enregistré');
+  } catch (err) {
+    console.error(err);
+    showToast('Erreur sauvegarde ordre : ' + describeError(err).slice(0, 80));
+  }
+}
 
 // ── Modal Add ──
 const overlayAdd = document.getElementById('overlayAdd');
