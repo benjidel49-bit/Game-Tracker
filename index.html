@@ -199,9 +199,40 @@ footer{border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center
   .grid{grid-template-columns:repeat(2,1fr)}
   .btn-manage span{display:none}
 }
+
+/* ── Verrouillage par mot de passe ── */
+#lockScreen{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;
+  padding:1rem;background:rgba(10,12,16,.55);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+#lockScreen.hidden{display:none}
+.lock-box{width:100%;max-width:340px;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:1.75rem 1.5rem;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.lock-icon{font-size:2rem;margin-bottom:.5rem}
+.lock-title{font-family:'Rajdhani',sans-serif;font-size:1.4rem;font-weight:700;letter-spacing:.05em;color:var(--accent);margin-bottom:.25rem}
+.lock-sub{font-size:.8rem;color:var(--muted);margin-bottom:1.1rem}
+.lock-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--text);font-family:'Inter',sans-serif;font-size:1rem;padding:10px 12px;outline:none;
+  text-align:center;letter-spacing:.2em;margin-bottom:.75rem}
+.lock-input:focus{border-color:var(--accent)}
+.lock-btn{width:100%;justify-content:center;padding:10px 14px;font-size:.95rem}
+.lock-error{color:var(--danger);font-size:.78rem;min-height:1.1em;margin-top:.6rem}
+.lock-box.shake{animation:lockShake .35s}
+@keyframes lockShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+body.locked>*:not(#lockScreen):not(script){filter:blur(10px);pointer-events:none;user-select:none}
 </style>
 </head>
-<body>
+<body class="locked">
+
+<div id="lockScreen" role="dialog" aria-modal="true" aria-labelledby="lockTitle">
+  <div class="lock-box" id="lockBox">
+    <div class="lock-icon">🔒</div>
+    <div class="lock-title" id="lockTitle">ACCÈS PROTÉGÉ</div>
+    <div class="lock-sub">Entrez le mot de passe pour utiliser le site</div>
+    <input type="password" id="lockInput" class="lock-input" inputmode="numeric" autocomplete="off" placeholder="••••••••" autofocus>
+    <button type="button" class="btn btn-add lock-btn" id="lockBtn">DÉVERROUILLER</button>
+    <div class="lock-error" id="lockError"></div>
+  </div>
+</div>
+
 
 <header>
   <div class="logo">GAME<span>TRACKERS</span></div>
@@ -316,6 +347,54 @@ footer{border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center
 </div>
 
 <div class="toast" id="toast"></div>
+
+<script>
+// ── Verrouillage par mot de passe ──
+(function () {
+  const PASS_HASH = 'dd4af151039afd92148c9eaeef81ab72c7eda0f2e14aacb8abca3e112bd8abb6'; // SHA-256
+  const KEY = 'gt_unlocked';
+  const screen = document.getElementById('lockScreen');
+  const input = document.getElementById('lockInput');
+  const err = document.getElementById('lockError');
+  const box = document.getElementById('lockBox');
+
+  async function sha256(str) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  function unlock() {
+    document.body.classList.remove('locked');
+    screen.classList.add('hidden');
+  }
+  function lock() {
+    document.body.classList.add('locked');
+    screen.classList.remove('hidden');
+    setTimeout(() => input.focus(), 50);
+  }
+  async function tryUnlock() {
+    let ok = false;
+    try { ok = (await sha256(input.value.trim())) === PASS_HASH; }
+    catch (e) { err.textContent = 'Navigateur non compatible (HTTPS requis).'; return; }
+    if (ok) {
+      try { sessionStorage.setItem(KEY, '1'); } catch (e) {}
+      err.textContent = '';
+      input.value = '';
+      unlock();
+    } else {
+      err.textContent = 'Mot de passe incorrect';
+      input.value = '';
+      box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+      input.focus();
+    }
+  }
+  document.getElementById('lockBtn').addEventListener('click', tryUnlock);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') tryUnlock(); });
+
+  let already = false;
+  try { already = sessionStorage.getItem(KEY) === '1'; } catch (e) {}
+  already ? unlock() : lock();
+})();
+</script>
 
 <script>
 const DEFAULT_CATS = [
